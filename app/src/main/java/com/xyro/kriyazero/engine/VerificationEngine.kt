@@ -12,12 +12,14 @@ import com.xyro.kriyazero.domain.normalizeLabel
  * Deterministic execution gate for a Skill Capsule.
  *
  * The verifier deliberately does not ask an LLM whether a learner passed.
- * Perception produces semantic evidence; this engine applies explicit procedure
+ * Perception produces evidence; this engine applies explicit procedure
  * constraints to that evidence. This separation keeps pass/fail reproducible.
  */
 class VerificationEngine(
     private val capsule: SkillCapsule,
     private val objectConfidenceThreshold: Float = 0.60f,
+    private val visualSimilarityThreshold: Float = 0.94f,
+    private val futureVisualMargin: Float = 0.015f,
 ) {
     private val steps = capsule.orderedSteps
     private val completedStepIds = linkedSetOf<String>()
@@ -31,6 +33,12 @@ class VerificationEngine(
     init {
         require(objectConfidenceThreshold in 0f..1f) {
             "Object confidence threshold must be between 0 and 1."
+        }
+        require(visualSimilarityThreshold in 0f..1f) {
+            "Visual similarity threshold must be between 0 and 1."
+        }
+        require(futureVisualMargin >= 0f) {
+            "Future visual margin must be non-negative."
         }
     }
 
@@ -65,26 +73,32 @@ class VerificationEngine(
             return VerificationDecision(
                 status = VerificationStatus.FAIL,
                 step = step,
-                message = "This step has no visual verifier evidence yet. Capture a checkpoint before assessment.",
+                message = "This step has no verifier evidence yet. Capture a checkpoint before assessment.",
             )
         }
 
-        val missingObjects = step.requiredObjects.filterNot {
-            observation.containsObject(it, objectConfidenceThreshold)
-        }.toSet()
-
-        val normalizedObservedStates = observation.stateTags
-            .map { it.normalizeLabel() }
-            .toSet()
-        val missingStateTags = step.expectedStateTags - normalizedObservedStates
+        val currentMatch = step.evaluate(observation)
 
         // Check for a future state before accepting the current checkpoint. This is
-        // necessary for cumulative procedures where a later state also contains all
-        // evidence from an earlier state. Otherwise skipping ahead could look valid.
+        // necessary for cumulative procedures where a later state can also satisfy
+        // all semantic requirements from an earlier state.
         val futureMatch = steps
             .dropWhile { it.id != step.id }
             .drop(1)
-            .firstOrNull { candidate -> candidate.matches(observation) }
+            .map { candidate -> candidate to candidate.evaluate(observation) }
+            .firstOrNull { (candidate, result) ->
+                if (!result.isMatch) return@firstOrNull false
+
+                val currentVisual = currentMatch.visualSimilarity
+                val candidateVisual = result.visualSimilarity
+
+                when {
+                    candidate.visualFingerprint == null -> true
+                    step.visualFingerprint == null -> true
+                    currentVisual == null || candidateVisual == null -> false
+                    else -> candidateVisual >= currentVisual + futureVisualMargin
+                }
+            }
 
         if (futureMatch != null) {
             registerFailedAttempt(step)
@@ -92,14 +106,16 @@ class VerificationEngine(
             return VerificationDecision(
                 status = VerificationStatus.SEQUENCE_ERROR,
                 step = step,
-                matchedFutureStep = futureMatch,
-                message = "Execution jumped ahead to ${futureMatch.title}. Complete ${step.title} first.",
-                missingObjects = missingObjects,
-                missingStateTags = missingStateTags,
+                matchedFutureStep = futureMatch.first,
+                message = "Execution jumped ahead to ${futureMatch.first.title}. Complete ${step.title} first.",
+                missingObjects = currentMatch.missingObjects,
+                missingStateTags = currentMatch.missingStateTags,
+                visualSimilarity = currentMatch.visualSimilarity,
+                visualCheckpointMissing = currentMatch.visualCheckpointMissing,
             )
         }
 
-        if (missingObjects.isEmpty() && missingStateTags.isEmpty()) {
+        if (currentMatch.isMatch) {
             val hadPreviousFailure = (failedAttemptCountByStep[step.id] ?: 0) > 0
             completedStepIds += step.id
             if (!hadPreviousFailure) firstAttemptPassStepIds += step.id
@@ -113,6 +129,7 @@ class VerificationEngine(
                 } else {
                     "${step.title} verified. Continue to the next step."
                 },
+                visualSimilarity = currentMatch.visualSimilarity,
             )
         }
 
@@ -120,9 +137,11 @@ class VerificationEngine(
         return VerificationDecision(
             status = VerificationStatus.FAIL,
             step = step,
-            message = buildFailureMessage(missingObjects, missingStateTags),
-            missingObjects = missingObjects,
-            missingStateTags = missingStateTags,
+            message = buildFailureMessage(currentMatch),
+            missingObjects = currentMatch.missingObjects,
+            missingStateTags = currentMatch.missingStateTags,
+            visualSimilarity = currentMatch.visualSimilarity,
+            visualCheckpointMissing = currentMatch.visualCheckpointMissing,
         )
     }
 
@@ -142,32 +161,74 @@ class VerificationEngine(
             (failedAttemptCountByStep[step.id] ?: 0) + 1
     }
 
-    private fun ProcedureStep.matches(observation: Observation): Boolean {
-        if (!hasVerificationEvidence()) return false
+    private fun ProcedureStep.evaluate(observation: Observation): StepMatch {
+        if (!hasVerificationEvidence()) return StepMatch.noEvidence()
 
-        val objectsMatch = requiredObjects.all {
+        val missingObjects = requiredObjects.filterNot {
             observation.containsObject(it, objectConfidenceThreshold)
-        }
+        }.toSet()
+
         val observedStates = observation.stateTags.map { it.normalizeLabel() }.toSet()
-        val statesMatch = expectedStateTags.all { it in observedStates }
-        return objectsMatch && statesMatch
+        val missingStateTags = expectedStateTags - observedStates
+
+        val visualCheckpointMissing = visualFingerprint != null && observation.visualFingerprint == null
+        val visualSimilarity = if (visualFingerprint != null && observation.visualFingerprint != null) {
+            visualFingerprint.similarity(observation.visualFingerprint)
+        } else {
+            null
+        }
+        val visualMatches = when {
+            visualFingerprint == null -> true
+            visualCheckpointMissing -> false
+            else -> (visualSimilarity ?: 0f) >= visualSimilarityThreshold
+        }
+
+        return StepMatch(
+            missingObjects = missingObjects,
+            missingStateTags = missingStateTags,
+            visualSimilarity = visualSimilarity,
+            visualCheckpointMissing = visualCheckpointMissing,
+            isMatch = missingObjects.isEmpty() && missingStateTags.isEmpty() && visualMatches,
+        )
     }
 
     private fun ProcedureStep.hasVerificationEvidence(): Boolean =
-        requiredObjects.isNotEmpty() || expectedStateTags.isNotEmpty()
+        requiredObjects.isNotEmpty() ||
+            expectedStateTags.isNotEmpty() ||
+            visualFingerprint != null
 
-    private fun buildFailureMessage(
-        missingObjects: Set<String>,
-        missingStateTags: Set<String>,
-    ): String {
+    private fun buildFailureMessage(match: StepMatch): String {
         val reasons = buildList {
-            if (missingObjects.isNotEmpty()) {
-                add("missing: ${missingObjects.sorted().joinToString()}")
+            if (match.missingObjects.isNotEmpty()) {
+                add("missing: ${match.missingObjects.sorted().joinToString()}")
             }
-            if (missingStateTags.isNotEmpty()) {
-                add("state mismatch: ${missingStateTags.sorted().joinToString()}")
+            if (match.missingStateTags.isNotEmpty()) {
+                add("state mismatch: ${match.missingStateTags.sorted().joinToString()}")
+            }
+            if (match.visualCheckpointMissing) {
+                add("camera fingerprint unavailable")
+            } else if (match.visualSimilarity != null && match.visualSimilarity < visualSimilarityThreshold) {
+                add("visual similarity ${(match.visualSimilarity * 100).toInt()}%")
             }
         }
         return "Checkpoint not verified — ${reasons.joinToString("; ")}."
+    }
+
+    private data class StepMatch(
+        val missingObjects: Set<String>,
+        val missingStateTags: Set<String>,
+        val visualSimilarity: Float?,
+        val visualCheckpointMissing: Boolean,
+        val isMatch: Boolean,
+    ) {
+        companion object {
+            fun noEvidence() = StepMatch(
+                missingObjects = emptySet(),
+                missingStateTags = emptySet(),
+                visualSimilarity = null,
+                visualCheckpointMissing = true,
+                isMatch = false,
+            )
+        }
     }
 }
