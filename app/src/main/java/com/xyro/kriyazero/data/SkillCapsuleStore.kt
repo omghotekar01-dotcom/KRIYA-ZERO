@@ -31,7 +31,7 @@ class SkillCapsuleStore(
     fun loadById(capsuleId: String): SkillCapsule? {
         val file = File(capsuleDirectory, "${safeFileName(capsuleId)}.kriya")
         if (!file.isFile) return null
-        return SkillCapsuleCodec.decode(file.readText())
+        return runCatching { SkillCapsuleCodec.decode(file.readText()) }.getOrNull()
     }
 
     fun loadAll(): List<SkillCapsule> {

@@ -71,4 +71,19 @@ class SkillCapsulePersistenceTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun store_returnsNullForCorruptedCapsuleInsteadOfCrashingRecovery() {
+        val root = Files.createTempDirectory("kriya-corrupt-test").toFile()
+        try {
+            val store = SkillCapsuleStore(root)
+            val saved = store.save(capsule)
+            saved.writeText("not-a-valid-capsule")
+
+            assertNull(store.loadById(capsule.id))
+            assertTrue(store.loadAll().isEmpty())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
