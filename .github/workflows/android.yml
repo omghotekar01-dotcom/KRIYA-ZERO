@@ -46,9 +46,15 @@ jobs:
       - name: Assemble debug APK
         run: gradle --no-daemon assembleDebug
 
+      - name: Generate APK checksum
+        run: sha256sum app/build/outputs/apk/debug/app-debug.apk > app/build/outputs/apk/debug/app-debug.apk.sha256
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: kriya-zero-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
+          retention-days: 14
