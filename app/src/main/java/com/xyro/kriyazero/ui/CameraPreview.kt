@@ -14,8 +14,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -108,9 +108,9 @@ fun KriyaCameraPreview(
     Box(modifier = modifier.fillMaxWidth()) {
         AndroidView(
             factory = { previewView },
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier.fillMaxSize(),
         )
-        Canvas(modifier = Modifier.matchParentSize()) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
             val insetX = size.width * 0.10f
             val insetY = size.height * 0.10f
             drawRect(
