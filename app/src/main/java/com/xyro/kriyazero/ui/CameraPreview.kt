@@ -31,6 +31,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.xyro.kriyazero.camera.VisualFingerprintExtractor
+import com.xyro.kriyazero.domain.FingerprintStabilizer
 import com.xyro.kriyazero.domain.VisualFingerprint
 import java.util.concurrent.Executors
 
@@ -95,6 +96,7 @@ fun KriyaCameraPreview(
         }
     }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val stabilizer = remember { FingerprintStabilizer(windowSize = 5) }
 
     AndroidView(
         factory = { previewView },
@@ -124,9 +126,10 @@ fun KriyaCameraPreview(
                                 if (now - lastEmissionMs >= 180L) {
                                     val fingerprint = VisualFingerprintExtractor.extract(image)
                                     if (fingerprint != null) {
+                                        val stableFingerprint = stabilizer.push(fingerprint)
                                         lastEmissionMs = now
                                         mainExecutor.execute {
-                                            currentOnFingerprint(fingerprint)
+                                            currentOnFingerprint(stableFingerprint)
                                         }
                                     }
                                 }
@@ -151,6 +154,7 @@ fun KriyaCameraPreview(
 
         onDispose {
             analysis?.clearAnalyzer()
+            stabilizer.reset()
             if (cameraProviderFuture.isDone) {
                 runCatching { cameraProviderFuture.get().unbindAll() }
             }
