@@ -5,10 +5,13 @@ This file records the repository-backed demo health for KRIYA ZERO without turni
 ## Current verified repository state
 
 - Primary development branch: `main`
-- Protected fallback branch: `known-good/iqoo-phase1` — preserve this branch as the recovery point for the known-good phase-1 build.
+- Protected fallback branch: `known-good/iqoo-phase1` at `7276a197246b5fe482764267fa8c0fec0c17e22b` — preserve this branch as the recovery point for the known-good phase-1 build.
 - Critical demo path: Android phone first, local/offline, Teach → Compile → Verify → Assessment.
 - PASS/FAIL authority: deterministic `VerificationEngine`; an LLM is not the authority for progression or assessment.
-- Latest pre-documentation Android CI run on `main` completed successfully and produced the `kriya-zero-debug` APK artifact.
+- Android CI run #38 for commit `2c5be73a25a4507fa1210fddbba91e3f07c53d6b` completed successfully.
+- Verified CI steps include unit tests, debug APK assembly, SHA-256 checksum generation, and artifact upload.
+- Verified artifact: `kriya-zero-debug`, non-expired and retained until 2026-09-15.
+- Artifact digest reported by GitHub Actions: `sha256:b16ce0089fcca873116201bb6229f67158e47c4ca8c203fe151505474e9620e3`.
 
 ## Persistence status
 
