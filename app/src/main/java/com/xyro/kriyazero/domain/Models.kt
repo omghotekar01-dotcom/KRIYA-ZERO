@@ -1,18 +1,63 @@
 package com.xyro.kriyazero.domain
 
+import kotlin.math.abs
+
+/**
+ * Compact grid fingerprint sampled directly from a camera YUV frame.
+ *
+ * It is intentionally simple and transparent: the MVP can learn a new visual
+ * checkpoint without a task-specific model or cloud call. More capable image
+ * embeddings can replace this representation behind the same domain boundary.
+ */
+data class VisualFingerprint(
+    val gridSize: Int,
+    val y: List<Int>,
+    val u: List<Int>,
+    val v: List<Int>,
+) {
+    init {
+        require(gridSize > 1) { "Fingerprint grid must be at least 2x2." }
+        require(y.size == gridSize * gridSize) { "Unexpected Y fingerprint size." }
+        require(u.size == y.size && v.size == y.size) { "Y/U/V fingerprint sizes must match." }
+    }
+
+    /**
+     * Similarity in [0, 1]. Luma is mean-normalized so global brightness shifts
+     * have less influence than local structure and chroma changes.
+     */
+    fun similarity(other: VisualFingerprint): Float {
+        if (gridSize != other.gridSize || y.size != other.y.size) return 0f
+
+        val meanY = y.average()
+        val otherMeanY = other.y.average()
+        var distance = 0f
+
+        for (index in y.indices) {
+            val relativeLumaA = y[index] - meanY
+            val relativeLumaB = other.y[index] - otherMeanY
+            val lumaDistance = abs(relativeLumaA - relativeLumaB).toFloat() / 255f
+            val uDistance = abs(u[index] - other.u[index]).toFloat() / 255f
+            val vDistance = abs(v[index] - other.v[index]).toFloat() / 255f
+
+            distance += (0.25f * lumaDistance) +
+                (0.375f * uDistance) +
+                (0.375f * vDistance)
+        }
+
+        return (1f - (distance / y.size.toFloat())).coerceIn(0f, 1f)
+    }
+}
+
 /**
  * A compact representation of one demonstration moment after perception has
- * converted camera/audio input into semantic evidence.
- *
- * The perception layer is intentionally outside the domain module. During the
- * hackathon it can be backed by deterministic demo evidence, ML Kit/MediaPipe,
- * TFLite/LiteRT, or a local VLM without changing verification semantics.
+ * converted camera/audio input into verifier evidence.
  */
 data class DemonstrationSegment(
     val index: Int,
     val narration: String,
-    val observedObjects: Set<String>,
+    val observedObjects: Set<String> = emptySet(),
     val stateTags: Set<String> = emptySet(),
+    val visualFingerprint: VisualFingerprint? = null,
     val timestampMs: Long = 0L,
 )
 
@@ -23,6 +68,7 @@ data class ProcedureStep(
     val instruction: String,
     val requiredObjects: Set<String>,
     val expectedStateTags: Set<String>,
+    val visualFingerprint: VisualFingerprint? = null,
     val dependsOn: Set<String> = emptySet(),
 )
 
@@ -49,14 +95,15 @@ data class SkillCapsule(
 }
 
 /**
- * Semantic evidence extracted from a live frame.
+ * Evidence extracted from the learner's current live frame.
  *
- * objectConfidence keys are normalized lowercase labels. stateTags capture
- * task-specific visual states such as `resistor-in-row-10` or `led-oriented`.
+ * The same observation can contain semantic detector output and/or a raw visual
+ * fingerprint learned directly from the demonstration.
  */
 data class Observation(
-    val objectConfidence: Map<String, Float>,
+    val objectConfidence: Map<String, Float> = emptyMap(),
     val stateTags: Set<String> = emptySet(),
+    val visualFingerprint: VisualFingerprint? = null,
     val capturedAtEpochMs: Long = System.currentTimeMillis(),
 ) {
     fun containsObject(label: String, threshold: Float): Boolean =
@@ -76,6 +123,8 @@ data class VerificationDecision(
     val message: String,
     val missingObjects: Set<String> = emptySet(),
     val missingStateTags: Set<String> = emptySet(),
+    val visualSimilarity: Float? = null,
+    val visualCheckpointMissing: Boolean = false,
     val matchedFutureStep: ProcedureStep? = null,
 )
 
