@@ -21,6 +21,15 @@ class ProcedureCompiler(
         require(segments.map { it.index }.distinct().size == segments.size) {
             "Demonstration segment indices must be unique."
         }
+        require(
+            segments.all {
+                it.observedObjects.isNotEmpty() ||
+                    it.stateTags.isNotEmpty() ||
+                    it.visualFingerprint != null
+            },
+        ) {
+            "Every demonstration checkpoint must contain verifier evidence."
+        }
 
         val ordered = segments.sortedBy { it.index }
         val steps = ordered.mapIndexed { position, segment ->
@@ -41,6 +50,7 @@ class ProcedureCompiler(
                     .map { it.normalizeLabel() }
                     .filter { it.isNotBlank() }
                     .toSet(),
+                visualFingerprint = segment.visualFingerprint,
                 dependsOn = previousStepId?.let(::setOf) ?: emptySet(),
             )
         }
