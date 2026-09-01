@@ -10,9 +10,12 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -89,6 +95,7 @@ fun KriyaCameraPreview(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentOnFingerprint by rememberUpdatedState(onFingerprint)
+    val guideColor = MaterialTheme.colorScheme.primary
     val previewView = remember {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -98,10 +105,25 @@ fun KriyaCameraPreview(
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val stabilizer = remember { FingerprintStabilizer(windowSize = 5) }
 
-    AndroidView(
-        factory = { previewView },
-        modifier = modifier.fillMaxWidth(),
-    )
+    Box(modifier = modifier.fillMaxWidth()) {
+        AndroidView(
+            factory = { previewView },
+            modifier = Modifier.matchParentSize(),
+        )
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val insetX = size.width * 0.10f
+            val insetY = size.height * 0.10f
+            drawRect(
+                color = guideColor.copy(alpha = 0.92f),
+                topLeft = Offset(insetX, insetY),
+                size = Size(
+                    width = size.width - (2f * insetX),
+                    height = size.height - (2f * insetY),
+                ),
+                style = Stroke(width = 3.dp.toPx()),
+            )
+        }
+    }
 
     DisposableEffect(lifecycleOwner, previewView) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
