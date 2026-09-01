@@ -61,9 +61,7 @@ class VerificationEngine(
         }
 
         if (!step.hasVerificationEvidence()) {
-            failedAttempts += 1
-            failedAttemptCountByStep[step.id] =
-                (failedAttemptCountByStep[step.id] ?: 0) + 1
+            registerFailedAttempt(step)
             return VerificationDecision(
                 status = VerificationStatus.FAIL,
                 step = step,
@@ -79,6 +77,27 @@ class VerificationEngine(
             .map { it.normalizeLabel() }
             .toSet()
         val missingStateTags = step.expectedStateTags - normalizedObservedStates
+
+        // Check for a future state before accepting the current checkpoint. This is
+        // necessary for cumulative procedures where a later state also contains all
+        // evidence from an earlier state. Otherwise skipping ahead could look valid.
+        val futureMatch = steps
+            .dropWhile { it.id != step.id }
+            .drop(1)
+            .firstOrNull { candidate -> candidate.matches(observation) }
+
+        if (futureMatch != null) {
+            registerFailedAttempt(step)
+            sequenceErrors += 1
+            return VerificationDecision(
+                status = VerificationStatus.SEQUENCE_ERROR,
+                step = step,
+                matchedFutureStep = futureMatch,
+                message = "Execution jumped ahead to ${futureMatch.title}. Complete ${step.title} first.",
+                missingObjects = missingObjects,
+                missingStateTags = missingStateTags,
+            )
+        }
 
         if (missingObjects.isEmpty() && missingStateTags.isEmpty()) {
             val hadPreviousFailure = (failedAttemptCountByStep[step.id] ?: 0) > 0
@@ -97,27 +116,7 @@ class VerificationEngine(
             )
         }
 
-        failedAttempts += 1
-        failedAttemptCountByStep[step.id] =
-            (failedAttemptCountByStep[step.id] ?: 0) + 1
-
-        val futureMatch = steps
-            .dropWhile { it.id != step.id }
-            .drop(1)
-            .firstOrNull { candidate -> candidate.matches(observation) }
-
-        if (futureMatch != null) {
-            sequenceErrors += 1
-            return VerificationDecision(
-                status = VerificationStatus.SEQUENCE_ERROR,
-                step = step,
-                matchedFutureStep = futureMatch,
-                message = "Execution jumped ahead to ${futureMatch.title}. Complete ${step.title} first.",
-                missingObjects = missingObjects,
-                missingStateTags = missingStateTags,
-            )
-        }
-
+        registerFailedAttempt(step)
         return VerificationDecision(
             status = VerificationStatus.FAIL,
             step = step,
@@ -136,6 +135,12 @@ class VerificationEngine(
         sequenceErrors = sequenceErrors,
         assistanceCount = assistanceCount,
     )
+
+    private fun registerFailedAttempt(step: ProcedureStep) {
+        failedAttempts += 1
+        failedAttemptCountByStep[step.id] =
+            (failedAttemptCountByStep[step.id] ?: 0) + 1
+    }
 
     private fun ProcedureStep.matches(observation: Observation): Boolean {
         if (!hasVerificationEvidence()) return false
