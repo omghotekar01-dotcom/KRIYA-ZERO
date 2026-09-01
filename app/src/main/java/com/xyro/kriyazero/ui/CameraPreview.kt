@@ -2,9 +2,11 @@ package com.xyro.kriyazero.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -20,6 +22,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -27,6 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.xyro.kriyazero.camera.VisualFingerprintExtractor
+import com.xyro.kriyazero.domain.VisualFingerprint
+import java.util.concurrent.Executors
 
 @Composable
 fun CameraPermissionGate(
@@ -77,15 +83,18 @@ fun CameraPermissionGate(
 @Composable
 fun KriyaCameraPreview(
     modifier: Modifier = Modifier,
+    onFingerprint: (VisualFingerprint) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val currentOnFingerprint by rememberUpdatedState(onFingerprint)
     val previewView = remember {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
     }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
 
     AndroidView(
         factory = { previewView },
@@ -94,7 +103,9 @@ fun KriyaCameraPreview(
 
     DisposableEffect(lifecycleOwner, previewView) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        val executor = ContextCompat.getMainExecutor(context)
+        val mainExecutor = ContextCompat.getMainExecutor(context)
+        var lastEmissionMs = 0L
+        var analysis: ImageAnalysis? = null
 
         cameraProviderFuture.addListener(
             {
@@ -103,22 +114,47 @@ fun KriyaCameraPreview(
                     .build()
                     .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
+                analysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { useCase ->
+                        useCase.setAnalyzer(analysisExecutor) { image ->
+                            try {
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastEmissionMs >= 180L) {
+                                    val fingerprint = VisualFingerprintExtractor.extract(image)
+                                    if (fingerprint != null) {
+                                        lastEmissionMs = now
+                                        mainExecutor.execute {
+                                            currentOnFingerprint(fingerprint)
+                                        }
+                                    }
+                                }
+                            } finally {
+                                image.close()
+                            }
+                        }
+                    }
+
                 runCatching {
                     provider.unbindAll()
                     provider.bindToLifecycle(
                         lifecycleOwner,
                         CameraSelector.DEFAULT_BACK_CAMERA,
                         preview,
+                        analysis,
                     )
                 }
             },
-            executor,
+            mainExecutor,
         )
 
         onDispose {
+            analysis?.clearAnalyzer()
             if (cameraProviderFuture.isDone) {
                 runCatching { cameraProviderFuture.get().unbindAll() }
             }
+            analysisExecutor.shutdownNow()
         }
     }
 }
