@@ -1,0 +1,64 @@
+name: Build submission assets
+
+on:
+  push:
+    paths:
+      - 'scripts/generate_submission_assets.py'
+      - '.github/workflows/submission-assets.yml'
+      - 'submission/PORTAL_COPY.md'
+      - 'submission/README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kriya-submission-assets
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install generator dependencies
+        run: python -m pip install --disable-pip-version-check python-pptx reportlab
+
+      - name: Generate final PPTX and PDF
+        run: python scripts/generate_submission_assets.py
+
+      - name: Verify generated files
+        run: |
+          test -s submission/KRIYA_ZERO_FINAL_DECK.pptx
+          test -s submission/KRIYA_ZERO_FINAL_IDEA.pdf
+          python - <<'PY'
+          from zipfile import ZipFile
+          from pathlib import Path
+          deck = Path('submission/KRIYA_ZERO_FINAL_DECK.pptx')
+          pdf = Path('submission/KRIYA_ZERO_FINAL_IDEA.pdf')
+          with ZipFile(deck) as z:
+              assert '[Content_Types].xml' in z.namelist()
+              assert any(name.startswith('ppt/slides/slide') and name.endswith('.xml') for name in z.namelist())
+          assert pdf.read_bytes().startswith(b'%PDF')
+          print('Verified:', deck, deck.stat().st_size, 'bytes')
+          print('Verified:', pdf, pdf.stat().st_size, 'bytes')
+          PY
+
+      - name: Commit generated submission assets
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add submission/KRIYA_ZERO_FINAL_DECK.pptx submission/KRIYA_ZERO_FINAL_IDEA.pdf
+          if git diff --cached --quiet; then
+            echo 'Submission assets are already current.'
+            exit 0
+          fi
+          git commit -m 'docs: generate final iQOO submission assets [skip ci]'
+          git push
