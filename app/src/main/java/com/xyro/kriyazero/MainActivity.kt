@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.xyro.kriyazero.ui.KriyaApp
+import com.xyro.kriyazero.ui.KriyaLiveApp
 import com.xyro.kriyazero.ui.theme.KriyaZeroTheme
 
 class MainActivity : ComponentActivity() {
@@ -13,7 +13,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KriyaZeroTheme {
-                KriyaApp()
+                KriyaLiveApp()
             }
         }
     }
