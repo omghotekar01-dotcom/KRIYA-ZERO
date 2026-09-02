@@ -42,6 +42,10 @@ Skill Capsule
  └─ temporal dependencies
 ```
 
+### Local Skill Capsule persistence
+
+Compiled Skill Capsules can be saved on-device as local `.kriya` files, loaded again by ID or recency, and deleted without requiring a network connection. Corrupted saved capsules are ignored instead of crashing the capsule library path.
+
 ### Deterministic verification
 
 The execution engine, not an LLM, decides progression.
@@ -201,7 +205,7 @@ The critical path should work with network disabled.
 The repository is actively being hardened. Current limitations include:
 
 - visual fingerprints assume a reasonably stable phone/workspace viewpoint,
-- no persistent Skill Capsule storage yet,
+- Skill Capsule persistence is local file-based storage rather than a synchronized multi-device library,
 - narration is currently text input; local speech transcription is not wired yet,
 - object/state semantics are optional development metadata rather than a live trained detector,
 - the visual fingerprint is not suitable for hidden-state or safety-critical procedures,
