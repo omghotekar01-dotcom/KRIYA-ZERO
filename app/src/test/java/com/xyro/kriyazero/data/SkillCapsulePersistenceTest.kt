@@ -73,6 +73,26 @@ class SkillCapsulePersistenceTest {
     }
 
     @Test
+    fun store_keepsDistinctCapsulesWhoseSanitizedIdsWouldCollide() {
+        val root = Files.createTempDirectory("kriya-collision-test").toFile()
+        try {
+            val store = SkillCapsuleStore(root)
+            val first = capsule.copy(id = "demo/capsule")
+            val second = capsule.copy(id = "demo-capsule", name = "Second Skill")
+
+            val firstFile = store.save(first)
+            val secondFile = store.save(second)
+
+            assertTrue(firstFile != secondFile)
+            assertEquals(first, store.loadById(first.id))
+            assertEquals(second, store.loadById(second.id))
+            assertEquals(setOf(first.id, second.id), store.loadAll().map { it.id }.toSet())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun store_returnsNullForCorruptedCapsuleInsteadOfCrashingRecovery() {
         val root = Files.createTempDirectory("kriya-corrupt-test").toFile()
         try {
